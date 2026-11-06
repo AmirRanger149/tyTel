@@ -1,0 +1,65 @@
+x-app: &app
+  build: .
+  env_file: .env
+  environment: &app-environment
+    BOT_TOKEN: ${BOT_TOKEN:?Set BOT_TOKEN in .env}
+    REDIS_URL: redis://redis:6379/0
+    DATABASE_PATH: /data/tytel.db
+    TEMP_DIR: /data/tmp
+    WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+    USER_RATE_LIMIT: ${USER_RATE_LIMIT:-5}
+    GROUP_RATE_LIMIT: ${GROUP_RATE_LIMIT:-0}
+    MAX_DURATION_SECONDS: ${MAX_DURATION_SECONDS:-600}
+    MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-}
+    DEDUP_LOCK_TIMEOUT_SECONDS: ${DEDUP_LOCK_TIMEOUT_SECONDS:-1800}
+    JOB_TIMEOUT_SECONDS: ${JOB_TIMEOUT_SECONDS:-1800}
+    LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    COOKIES_PATH: /app/cookies/cookies.txt
+    PROXY_URL: ${PROXY_URL:-}
+    LOCAL_BOT_API_URL: ${LOCAL_BOT_API_URL:-}
+  volumes:
+    - app-data:/data
+    - ${COOKIES_PATH:-./cookies.txt}:/app/cookies/cookies.txt:ro
+  depends_on:
+    redis:
+      condition: service_healthy
+  init: true
+  restart: unless-stopped
+  stop_grace_period: 60s
+
+services:
+  bot:
+    <<: *app
+    command: sh -c "python -m pip install --upgrade yt-dlp && exec python -m bot.main"
+
+  worker:
+    <<: *app
+    command: sh -c "python -m pip install --upgrade yt-dlp && exec arq worker.settings.WorkerSettings"
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  telegram-bot-api:
+    image: aiogram/telegram-bot-api:latest
+    profiles: ["local-bot-api"]
+    environment:
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
+    command: --local --api-id=${TELEGRAM_API_ID:-} --api-hash=${TELEGRAM_API_HASH:-} --http-port=8081
+    volumes:
+      - telegram-bot-api-data:/var/lib/telegram-bot-api
+    restart: unless-stopped
+
+volumes:
+  app-data:
+  redis-data:
+  telegram-bot-api-data:

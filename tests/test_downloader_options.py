@@ -40,8 +40,10 @@ class DownloaderOptionTests(unittest.TestCase):
                 "bestvideo[height<=360]+bestaudio/best[height<=360]",
             )
             self.assertNotIn("720", options["format"])
+            options_1080 = downloader._options(Path(temp), False, max_height=1080)
+            self.assertIn("height<=1080", options_1080["format"])
             with self.assertRaises(ValueError):
-                downloader._options(Path(temp), False, max_height=1080)
+                downloader._options(Path(temp), False, max_height=1440)
 
     def test_empty_cookie_file_is_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

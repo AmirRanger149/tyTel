@@ -148,19 +148,23 @@ async def download_and_send(
                 tempfile.mkdtemp(prefix=f"{ctx.get('job_id', 'job')}-", dir=temp_root)
             )
             downloader: MediaDownloader = ctx["downloader"]
+            # The quality string is the cache key and the download cap
+            # in one: "video-480p" downloads at most 480p. Audio and
+            # legacy/unparseable qualities fall back to the default.
+            max_height = parse_video_height(quality) or DEFAULT_VIDEO_HEIGHT
             media = await downloader.download(
                 url,
                 directory,
                 audio_only=audio_only,
                 max_duration=max_duration,
-                # The quality string is the cache key and the download cap
-                # in one: "video-480p" downloads at most 480p. Audio and
-                # legacy/unparseable qualities fall back to the default.
-                max_height=parse_video_height(quality) or DEFAULT_VIDEO_HEIGHT,
+                max_height=max_height,
             )
             compressor: MediaCompressor = ctx["compressor"]
             output = await compressor.compress_if_needed(
-                media.path, media_type=media.media_type, duration=media.duration
+                media.path,
+                media_type=media.media_type,
+                duration=media.duration,
+                max_height=max_height,
             )
             delivery_type = media.media_type
             if delivery_type == "video" and output.suffix.lower() != ".mp4":

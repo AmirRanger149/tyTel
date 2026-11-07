@@ -16,11 +16,16 @@ INSTAGRAM_PATH_RE = re.compile(
 ALLOWED_DOMAINS = frozenset({"youtube.com", "youtu.be", "instagram.com"})
 TRAILING_PUNCTUATION = ".,!?;:،؛"
 
-# Video heights (in pixels) the user can pick after sending a link.
-# 720 stays the maximum, matching the documented safety/upload cap;
-# the lower options trade sharpness for a smaller, faster download.
-VIDEO_HEIGHTS: tuple[int, ...] = (720, 480, 360)
-DEFAULT_VIDEO_HEIGHT = VIDEO_HEIGHTS[0]
+# Video heights (in pixels) the user can pick after sending a link,
+# highest first. Nothing in the pipeline hard-codes a single height:
+# the yt-dlp selector, the cache key, and the compressor ladder are all
+# derived from the chosen height, so this tuple is the only list to extend.
+VIDEO_HEIGHTS: tuple[int, ...] = (1080, 720, 480, 360)
+# The default is deliberately NOT VIDEO_HEIGHTS[0]: it is the fallback
+# for legacy/unparseable quality strings and for jobs queued before
+# quality selection existed, and it must stay 720 even though 1080 is
+# now offered.
+DEFAULT_VIDEO_HEIGHT = 720
 _VIDEO_QUALITY_RE = re.compile(r"^video-(\d+)p$")
 
 

@@ -81,16 +81,19 @@ class YouTubeUrlTests(unittest.TestCase):
 class QualityTests(unittest.TestCase):
     def test_cache_quality_per_height(self) -> None:
         self.assertEqual(cache_quality(True), "audio")
+        # The default stays 720p even though 1080p is now offered.
         self.assertEqual(cache_quality(False), "video-720p")
+        self.assertEqual(cache_quality(False, 1080), "video-1080p")
         self.assertEqual(cache_quality(False, 480), "video-480p")
         self.assertEqual(cache_quality(False, 360), "video-360p")
         with self.assertRaises(ValueError):
-            cache_quality(False, 1080)
+            cache_quality(False, 1440)
 
     def test_parse_video_height(self) -> None:
+        self.assertEqual(parse_video_height("video-1080p"), 1080)
         self.assertEqual(parse_video_height("video-720p"), 720)
         self.assertEqual(parse_video_height("video-480p"), 480)
-        self.assertIsNone(parse_video_height("video-1080p"))
+        self.assertIsNone(parse_video_height("video-1440p"))
         self.assertIsNone(parse_video_height("audio"))
         self.assertIsNone(parse_video_height(""))
         self.assertIsNone(parse_video_height("video-abc"))
@@ -98,6 +101,10 @@ class QualityTests(unittest.TestCase):
     def test_video_format_caps_height(self) -> None:
         self.assertEqual(
             video_format(480), "bestvideo[height<=480]+bestaudio/best[height<=480]"
+        )
+        self.assertEqual(
+            video_format(1080),
+            "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
         )
         self.assertIn("height<=720", video_format(720))
         with self.assertRaises(ValueError):

@@ -63,10 +63,13 @@ The `app-data` volume retains cache and group settings. Redis uses append-only p
 
 | Command | Who | Effect |
 |---|---|---|
+| `/ctl on` / `/ctl off` | Group admins | Turn link processing on or off for the group. Bare `/ctl` shows the current state. |
 | `/enable` | Group admins | Enable link processing (groups are enabled by default). |
 | `/disable` | Group admins | Ignore links until re-enabled. |
-| `/settings` | Anyone in the group | Show current settings and command syntax. |
-| `/settings duration 300` | Group admins | Set maximum duration in seconds (30 up to the global limit). |
+| `/status` | Anyone in the group | Show the group's state and maximum duration. |
+| `/status duration 300` | Group admins | Set maximum duration in seconds (30 up to the global limit). |
+
+Unknown or malformed commands are answered with «کامند یافت نشد!» and nothing else. While a group is off, only `/ctl`, `/enable`, and `/status` are answered, so the bot can always be turned back on.
 
 Audio is no longer a group setting: it is a per-link choice in the quality prompt (the 🎵 button below the video qualities). Audio and each video quality use separate cache entries. A group's duration can lower, but not raise, the global `MAX_DURATION_SECONDS` safety limit. Groups that previously had audio-only enabled simply get the selection prompt like everyone else; the old `audio_only` database column, if present, is ignored.
 

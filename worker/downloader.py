@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import shutil
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -10,24 +12,29 @@ from typing import Any
 import yt_dlp
 
 from core.config import Settings
+from core.sanitize import sanitize_message, settings_secrets
+from worker.errors import (
+    AuthenticationRequired,
+    DownloadError,
+    MediaTooLarge,
+    MediaTooLong,
+    PermanentMediaError,
+    TransientMediaError,
+    UnsupportedMedia,
+    is_authentication_error,
+    is_retryable,
+)
+
+__all__ = [
+    "DownloadError",
+    "MediaDownloader",
+    "MediaTooLarge",
+    "MediaTooLong",
+    "UnsupportedMedia",
+    "DownloadedMedia",
+]
 
 logger = logging.getLogger(__name__)
-
-
-class DownloadError(Exception):
-    """A safe, expected download failure."""
-
-
-class MediaTooLong(DownloadError):
-    pass
-
-
-class UnsupportedMedia(DownloadError):
-    pass
-
-
-class MediaTooLarge(DownloadError):
-    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,20 +46,33 @@ class DownloadedMedia:
 
 
 class YtDlpLogger:
-    # Raw extractor messages can contain request or cookie-file details.
+    def __init__(self, sensitive_values: tuple[str, ...] = ()) -> None:
+        self.sensitive_values = sensitive_values
+
     def debug(self, message: str) -> None:
         return
 
     def warning(self, message: str) -> None:
-        logger.warning("yt-dlp emitted a warning", extra={"event": "ytdlp_warning"})
+        logger.warning(
+            "yt-dlp warning: %s",
+            sanitize_message(message, self.sensitive_values),
+            extra={"event": "ytdlp_warning"},
+        )
 
     def error(self, message: str) -> None:
-        logger.error("yt-dlp emitted an error", extra={"event": "ytdlp_error"})
+        logger.error(
+            "yt-dlp error: %s",
+            sanitize_message(message, self.sensitive_values),
+            extra={"event": "ytdlp_error"},
+        )
 
 
 class MediaDownloader:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self.sensitive_values = settings_secrets(
+            (settings.bot_token, settings.cookies_path, settings.proxy_url)
+        )
 
     async def download(
         self, url: str, directory: Path, *, audio_only: bool, max_duration: int
@@ -69,12 +89,17 @@ class MediaDownloader:
             ),
         )
 
-    def _options(self, directory: Path, audio_only: bool) -> dict[str, Any]:
+    def _options(
+        self,
+        directory: Path,
+        audio_only: bool,
+        cookie_file: Path | None = None,
+    ) -> dict[str, Any]:
         options: dict[str, Any] = {
             "noplaylist": True,
             "quiet": True,
             "no_warnings": False,
-            "logger": YtDlpLogger(),
+            "logger": YtDlpLogger(self.sensitive_values),
             "outtmpl": str(directory / "%(title).80B-%(id)s.%(ext)s"),
             "restrictfilenames": True,
             "format": (
@@ -98,20 +123,34 @@ class MediaDownloader:
         else:
             options["merge_output_format"] = "mp4"
 
-        cookies = self.settings.cookies_path
-        if cookies and cookies.is_file() and cookies.stat().st_size > 0:
-            # The option is intentionally never included in application logs.
-            options["cookiefile"] = str(cookies)
+        if cookie_file is not None:
+            # Only the writable per-job copy is passed to yt-dlp, never logged.
+            options["cookiefile"] = str(cookie_file)
         if self.settings.proxy_url:
             options["proxy"] = self.settings.proxy_url
         return options
+
+    def _copy_cookies(self, directory: Path) -> Path | None:
+        source = self.settings.cookies_path
+        if not source or not source.is_file() or source.stat().st_size == 0:
+            return None
+        destination = directory / ".yt-dlp-cookies.txt"
+        descriptor = os.open(
+            destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
+        )
+        with source.open("rb") as source_file, os.fdopen(descriptor, "wb") as target:
+            shutil.copyfileobj(source_file, target)
+        return destination
 
     def _download_sync(
         self, url: str, directory: Path, *, audio_only: bool, max_duration: int
     ) -> DownloadedMedia:
         directory.mkdir(parents=True, exist_ok=True)
+        cookie_file = self._copy_cookies(directory)
         try:
-            with yt_dlp.YoutubeDL(self._options(directory, audio_only)) as ydl:
+            with yt_dlp.YoutubeDL(
+                self._options(directory, audio_only, cookie_file)
+            ) as ydl:
                 info = ydl.extract_info(url, download=False)
                 self._validate_info(info, max_duration)
                 result = ydl.process_ie_result(info, download=True)
@@ -119,9 +158,18 @@ class MediaDownloader:
         except (MediaTooLong, UnsupportedMedia):
             raise
         except yt_dlp.utils.DownloadError as exc:
-            # Do not log exception text: extractor messages can contain request details.
-            logger.info("yt-dlp rejected a media download", extra={"event": "download_failed"})
-            raise DownloadError("download failed") from exc
+            message = sanitize_message(exc, self.sensitive_values)
+            logger.error(
+                "yt-dlp download failed (%s): %s",
+                type(exc).__name__,
+                message,
+                extra={"event": "download_failed"},
+            )
+            if is_authentication_error(exc):
+                raise AuthenticationRequired(message) from exc
+            if is_retryable(exc):
+                raise TransientMediaError(message) from exc
+            raise PermanentMediaError(message) from exc
 
         duration = float(result["duration"]) if result.get("duration") is not None else None
         return DownloadedMedia(
@@ -163,7 +211,9 @@ class MediaDownloader:
         files = [
             path
             for path in directory.rglob("*")
-            if path.is_file() and path.suffix not in {".part", ".ytdl"}
+            if path.is_file()
+            and path.suffix not in {".part", ".ytdl"}
+            and path.name != ".yt-dlp-cookies.txt"
         ]
         if not files:
             raise DownloadError("yt-dlp produced no media file")

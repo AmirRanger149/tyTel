@@ -16,6 +16,13 @@ class CacheTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         self.temp.cleanup()
 
+    async def test_sqlite_uses_wal_and_busy_timeout(self) -> None:
+        async with self.db.connect() as connection:
+            journal = await connection.execute("PRAGMA journal_mode")
+            busy = await connection.execute("PRAGMA busy_timeout")
+            self.assertEqual((await journal.fetchone())[0].lower(), "wal")
+            self.assertEqual((await busy.fetchone())[0], 30000)
+
     async def test_cache_is_scoped_by_url_and_quality(self) -> None:
         url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
         self.assertIsNone(await self.db.get_cached(url, "video-720p"))

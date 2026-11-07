@@ -17,10 +17,17 @@ class DownloaderOptionTests(unittest.TestCase):
                 cookies_path=cookies,
                 proxy_url="http://proxy.example:8080",
             )
-            options = MediaDownloader(settings)._options(Path(temp), audio_only=False)
+            downloader = MediaDownloader(settings)
+            cookie_copy = downloader._copy_cookies(Path(temp))
+            self.assertIsNotNone(cookie_copy)
+            assert cookie_copy is not None
+            options = downloader._options(Path(temp), False, cookie_copy)
             self.assertTrue(options["noplaylist"])
             self.assertIn("height<=720", options["format"])
-            self.assertEqual(options["cookiefile"], str(cookies))
+            self.assertEqual(options["cookiefile"], str(cookie_copy))
+            self.assertNotEqual(options["cookiefile"], str(cookies))
+            self.assertEqual(cookie_copy.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(cookies.read_text(encoding="utf-8"), "# Netscape HTTP Cookie File\n")
             self.assertEqual(options["proxy"], settings.proxy_url)
             self.assertNotIn("cookiefile", repr({k: v for k, v in options.items() if k != "cookiefile"}))
 

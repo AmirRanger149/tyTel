@@ -5,7 +5,14 @@ import logging
 import math
 from pathlib import Path
 
-from worker.downloader import MediaTooLarge
+from core.sanitize import sanitize_message
+from worker.errors import (
+    DownloadError,
+    MediaTooLarge,
+    PermanentMediaError,
+    TransientMediaError,
+    is_retryable,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,13 +40,15 @@ class MediaCompressor:
         )
         _, stderr = await process.communicate()
         if process.returncode != 0:
-            logger.error(
-                "ffmpeg failed with exit code %s: %s",
-                process.returncode,
-                stderr.decode("utf-8", errors="replace")[-2000:],
-                extra={"event": "ffmpeg_failed"},
+            detail = sanitize_message(
+                stderr.decode("utf-8", errors="replace")[-2000:]
             )
-            raise MediaTooLarge("ffmpeg could not reduce the media size")
+            failure = DownloadError(
+                f"ffmpeg exited with {process.returncode}: {detail}"
+            )
+            if is_retryable(failure):
+                raise TransientMediaError(str(failure))
+            raise PermanentMediaError(str(failure))
 
     async def _compress_audio(self, source: Path) -> Path:
         output = source.with_name(f"{source.stem}-compressed.mp3")

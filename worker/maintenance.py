@@ -18,7 +18,7 @@ async def update_ytdlp(ctx: dict[str, Any]) -> None:
         "install",
         "--disable-pip-version-check",
         "--upgrade",
-        "yt-dlp",
+        "yt-dlp[default]",
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
     )

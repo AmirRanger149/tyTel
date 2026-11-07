@@ -1,5 +1,12 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 x-app: &app
   build: .
+  logging: *default-logging
   env_file: .env
   environment: &app-environment
     BOT_TOKEN: ${BOT_TOKEN:?Set BOT_TOKEN in .env}
@@ -16,6 +23,7 @@ x-app: &app
     LOG_LEVEL: ${LOG_LEVEL:-INFO}
     COOKIES_PATH: /app/cookies/cookies.txt
     PROXY_URL: ${PROXY_URL:-}
+    ADMIN_CHAT_ID: ${ADMIN_CHAT_ID:-}
     LOCAL_BOT_API_URL: ${LOCAL_BOT_API_URL:-}
   volumes:
     - app-data:/data
@@ -30,14 +38,21 @@ x-app: &app
 services:
   bot:
     <<: *app
-    command: sh -c "python -m pip install --upgrade yt-dlp && exec python -m bot.main"
+    command: sh -c "python -m pip install --upgrade 'yt-dlp[default]' && exec python -m bot.main"
 
   worker:
     <<: *app
-    command: sh -c "python -m pip install --upgrade yt-dlp && exec arq worker.settings.WorkerSettings"
+    command: sh -c "python -m pip install --upgrade 'yt-dlp[default]' && exec arq worker.settings.WorkerSettings"
+    healthcheck:
+      test: ["CMD", "arq", "--check", "worker.settings.WorkerSettings"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   redis:
     image: redis:7-alpine
+    logging: *default-logging
     command: redis-server --appendonly yes
     volumes:
       - redis-data:/data
@@ -50,6 +65,7 @@ services:
 
   telegram-bot-api:
     image: aiogram/telegram-bot-api:latest
+    logging: *default-logging
     profiles: ["local-bot-api"]
     environment:
       TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}

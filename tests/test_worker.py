@@ -12,6 +12,7 @@ from core.cache import Database
 from core.config import Settings
 from core.messages import ERROR
 from worker.downloader import DownloadError
+from worker.errors import TransientMediaError
 from worker.tasks import download_and_send
 
 
@@ -66,7 +67,9 @@ class WorkerRetryTests(unittest.IsolatedAsyncioTestCase):
             await db.initialize()
             redis = Mock()
             redis.lock.return_value = FakeLock()
-            downloader = SimpleNamespace(download=AsyncMock(side_effect=DownloadError()))
+            downloader = SimpleNamespace(
+                download=AsyncMock(side_effect=TransientMediaError("network timeout"))
+            )
             ctx = {
                 "bot": SimpleNamespace(send_message=send_message),
                 "db": db,

@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     local_bot_api_url: str | None = Field(default=None, alias="LOCAL_BOT_API_URL")
     cookies_path: Path | None = Field(default=None, alias="COOKIES_PATH")
     proxy_url: str | None = Field(default=None, alias="PROXY_URL")
+    admin_chat_id: int | None = Field(default=None, alias="ADMIN_CHAT_ID")
     dedup_lock_timeout_seconds: int = Field(
         default=1800, ge=30, alias="DEDUP_LOCK_TIMEOUT_SECONDS"
     )
@@ -38,7 +39,7 @@ class Settings(BaseSettings):
     def empty_string_to_none(cls, value: object) -> object:
         return None if value == "" else value
 
-    @field_validator("cookies_path", "max_file_size_mb", mode="before")
+    @field_validator("cookies_path", "max_file_size_mb", "admin_chat_id", mode="before")
     @classmethod
     def empty_optional_to_none(cls, value: object) -> object:
         return None if value in ("", None) else value

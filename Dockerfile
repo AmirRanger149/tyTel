@@ -1,5 +1,7 @@
 FROM python:3.12-slim
 
+COPY --from=denoland/deno:bin /deno /usr/local/bin/deno
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \

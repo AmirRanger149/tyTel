@@ -9,9 +9,10 @@ A multi-group Telegram bot that replies with media from YouTube and Instagram li
 - Redis queue, per-URL download locks, fixed-window per-user rate limiting (5 links/minute), and optional per-group limiting.
 - SQLite cache keyed by normalized URL and quality, with Telegram `file_id` reuse.
 - Per-group enable/disable, maximum duration, and audio-only settings.
-- At most two retries after the initial attempt, with exponential backoff and Persian error replies.
-- Temporary files are removed in a worker `finally` block.
-- Structured JSON logs and graceful bot/worker shutdown.
+- At most two retries after the initial attempt, with exponential backoff only for transient network, server, ffmpeg, or Telegram failures. Authentication, private/unavailable, restricted, unsupported, oversized, and permission failures stop immediately.
+- Temporary files are removed in a worker `finally` block. yt-dlp writes only to a per-job mode-600 cookie copy; the mounted source stays read-only.
+- Deno and `yt-dlp[default]` (including the JavaScript challenge solver) are installed in the worker image.
+- Structured, sanitized JSON logs, actionable startup self-checks, and graceful bot/worker shutdown.
 
 ## Quick start with Docker Compose
 
@@ -29,7 +30,16 @@ cp .env.example .env
 touch cookies.txt
 ```
 
-`cookies.txt`, `.env`, downloaded media, and the SQLite database are ignored by Git. For Instagram authentication, export a **Netscape-format** cookie file from your own browser session to `./cookies.txt`. Compose mounts it read-only at `/app/cookies/cookies.txt`; it is never committed or deliberately logged. Set `PROXY_URL` if yt-dlp needs a proxy.
+`cookies.txt`, `.env`, downloaded media, and the SQLite database are ignored by Git. Compose mounts the source read-only at `/app/cookies/cookies.txt`. For every job, the worker copies it into the job directory with mode 600 and gives that writable copy to yt-dlp; the existing job cleanup deletes it. Cookie contents and paths are redacted from logs.
+
+The non-root container user is UID/GID `10001`. Make the bind-mounted file readable without making it writable by that user:
+
+```bash
+sudo chown 10001:10001 cookies.txt
+sudo chmod 600 cookies.txt
+```
+
+For YouTube authentication, use a **separate Google account**, not your primary account. Open a Private/Incognito window, sign in to YouTube, visit `https://youtube.com/robots.txt`, then export a **Netscape-format** cookie file from that window to `./cookies.txt`. Close the Private window immediately after exporting. The same file can also support Instagram when valid Instagram cookies are present. Set `PROXY_URL` if yt-dlp needs a proxy.
 
 ### 3. Start
 
@@ -38,7 +48,7 @@ docker compose up --build -d
 docker compose logs -f bot worker
 ```
 
-The bot and worker upgrade yt-dlp when their containers start. The worker also runs an upgrade through an `arq` cron job every day at 00:00. Stop with:
+The bot and worker upgrade `yt-dlp[default]` when their containers start. The worker also runs an upgrade through an `arq` cron job every day at 00:00. Deno is copied into the image, so no separate Deno container or host installation is needed. At worker startup, JSON logs report the yt-dlp version, Deno/ffmpeg/ffprobe availability, and cookie-file header status; missing components produce warnings with fix hints but do not prevent startup. Stop with:
 
 ```bash
 docker compose down
@@ -74,6 +84,7 @@ All settings come from `.env`; see `.env.example`.
 | `LOCAL_BOT_API_URL` | empty | Local Bot API base URL; raises the default limit from 50 MB to 2000 MB. |
 | `COOKIES_PATH` | `./cookies.txt` | Host cookie-file path for Compose. Outside Docker, it is the yt-dlp cookie path. |
 | `PROXY_URL` | empty | Optional proxy passed directly to yt-dlp. |
+| `ADMIN_CHAT_ID` | empty | Private chat/user ID for a cookie-expiry warning, rate limited to one message per hour. |
 | `JOB_TIMEOUT_SECONDS` | `1800` | Maximum arq job runtime. |
 | `DEDUP_LOCK_TIMEOUT_SECONDS` | `1800` | Redis lock lifetime for one normalized URL. |
 
@@ -99,13 +110,13 @@ Use 2000 MB only with a local server started using `--local`, as in the supplied
 
 ## Running without Docker
 
-Python 3.12, ffmpeg, ffprobe, and Redis are required:
+Python 3.12, Deno, ffmpeg, ffprobe, and Redis are required. Deno must be on `PATH` for YouTube's JavaScript challenges:
 
 ```bash
 python3.12 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
-pip install --upgrade yt-dlp
+pip install --upgrade 'yt-dlp[default]'
 cp .env.example .env
 # Set BOT_TOKEN and local paths such as REDIS_URL=redis://localhost:6379/0,
 # DATABASE_PATH=./data/tytel.db and TEMP_DIR=./data/tmp.
@@ -116,6 +127,35 @@ arq worker.settings.WorkerSettings
 
 The non-Docker worker's daily cron performs subsequent yt-dlp updates; run the upgrade command yourself whenever restarting outside Docker.
 
+## Troubleshooting
+
+### Bot does not see links in a group
+
+Open BotFather, run `/setprivacy`, select the bot, and choose **Disable**. Remove and re-add the bot if Telegram does not apply the changed privacy mode to an existing group. Also confirm that `/enable` has been run and that the bot can read group messages.
+
+### `Sign in to confirm you're not a bot`
+
+YouTube is rejecting the current anonymous/authenticated session. This is not retried. The group receives a generic temporary-service message; if `ADMIN_CHAT_ID` is set, the admin receives at most one private warning per hour that cookies may have expired. Re-export fresh Netscape cookies using the Private-window procedure above, replace `cookies.txt`, and recreate the worker. Cookie expiry can also appear as missing formats or repeated sign-in requirements.
+
+### `No supported JavaScript runtime`
+
+Deno is missing or not on the worker's `PATH`. Rebuild the supplied image so the `COPY --from=denoland/deno:bin` step runs, and ensure upgrades install `yt-dlp[default]`, not bare `yt-dlp`. Check the worker startup self-check. To inspect formats manually with a writable copy of the cookies:
+
+```bash
+docker compose exec worker sh -c \
+  'cp "$COOKIES_PATH" /tmp/check-cookies.txt && chmod 600 /tmp/check-cookies.txt && yt-dlp --cookies /tmp/check-cookies.txt -v -F "https://www.youtube.com/watch?v=VIDEO_ID"; status=$?; rm -f /tmp/check-cookies.txt; exit $status'
+```
+
+The verbose yt-dlp output should list Deno among its JavaScript runtimes and show real formats.
+
+### `does not look like a Netscape format cookies file`
+
+The file has the wrong format, is empty, or does not begin with `# Netscape HTTP Cookie File` or `# HTTP Cookie File`. Export actual browser cookies in Netscape format rather than copying JSON or a browser's internal SQLite database. Check the startup cookie warning, then fix the export and file permissions.
+
+### Read-only cookie errors or permission failures
+
+Do not remove `:ro` from the Compose mount. Current workers never give the mounted source to yt-dlp; they use a per-job writable copy. Ensure the source is readable by UID `10001`, `/data` is writable, and rebuild/recreate both services. Permission and read-only filesystem errors are deliberately not retried.
+
 ## Tests
 
 No additional test framework is required:
@@ -124,7 +164,7 @@ No additional test framework is required:
 python -m unittest discover -v
 ```
 
-Tests cover YouTube/Instagram extraction and normalization, domain rejection, duration/playlist limits, cookie/proxy options, SQLite cache and group settings, worker cache hits, and user/group rate limiting. Live Telegram and media-site integration require valid credentials, ffmpeg, network access to those services, and are therefore not part of the unit suite.
+Tests cover YouTube/Instagram extraction and normalization, domain rejection, duration/playlist limits, read-only cookie copying and cleanup, log sanitization, retry classification, startup self-checks, admin alerts, SQLite cache and group settings, worker cache hits, and user/group rate limiting. Live Telegram and media-site integration require valid credentials, ffmpeg, network access to those services, and are therefore not part of the unit suite.
 
 ## Architecture
 

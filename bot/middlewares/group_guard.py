@@ -22,6 +22,6 @@ class GroupGuardMiddleware(BaseMiddleware):
         group_settings = await db.get_group_settings(event.chat.id)
         data["group_settings"] = group_settings
         command = (event.text or "").split(maxsplit=1)[0].split("@")[0].lower()
-        if not group_settings.enabled and command not in {"/enable", "/settings"}:
+        if not group_settings.enabled and command not in {"/enable", "/ctl", "/status"}:
             return None
         return await handler(event, data)

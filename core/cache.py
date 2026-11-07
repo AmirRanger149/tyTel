@@ -19,7 +19,6 @@ class GroupSettings:
     chat_id: int
     enabled: bool = True
     max_duration: int | None = None
-    audio_only: bool = False
 
 
 class Database:
@@ -52,11 +51,13 @@ class Database:
                     PRIMARY KEY (normalized_url, quality)
                 );
 
+                -- Audio is a per-link choice now, not a group setting.
+                -- Databases created by older versions may still carry an
+                -- audio_only column; it is ignored and harmless.
                 CREATE TABLE IF NOT EXISTS group_settings (
                     chat_id INTEGER PRIMARY KEY,
                     enabled INTEGER NOT NULL DEFAULT 1,
-                    max_duration INTEGER,
-                    audio_only INTEGER NOT NULL DEFAULT 0
+                    max_duration INTEGER
                 );
                 """
             )
@@ -100,7 +101,7 @@ class Database:
     async def get_group_settings(self, chat_id: int) -> GroupSettings:
         async with self.connect() as connection:
             cursor = await connection.execute(
-                "SELECT chat_id, enabled, max_duration, audio_only "
+                "SELECT chat_id, enabled, max_duration "
                 "FROM group_settings WHERE chat_id=?",
                 (chat_id,),
             )
@@ -111,7 +112,6 @@ class Database:
             chat_id=row["chat_id"],
             enabled=bool(row["enabled"]),
             max_duration=row["max_duration"],
-            audio_only=bool(row["audio_only"]),
         )
 
     async def set_group_enabled(self, chat_id: int, enabled: bool) -> None:
@@ -120,11 +120,8 @@ class Database:
     async def set_group_duration(self, chat_id: int, seconds: int) -> None:
         await self._update_group(chat_id, "max_duration", seconds)
 
-    async def set_group_audio_only(self, chat_id: int, audio_only: bool) -> None:
-        await self._update_group(chat_id, "audio_only", int(audio_only))
-
     async def _update_group(self, chat_id: int, field: str, value: int) -> None:
-        if field not in {"enabled", "max_duration", "audio_only"}:
+        if field not in {"enabled", "max_duration"}:
             raise ValueError("invalid group setting")
         async with self.connect() as connection:
             await connection.execute(

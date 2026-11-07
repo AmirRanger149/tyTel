@@ -10,7 +10,12 @@ from bot.handlers.media import quality_keyboard
 from bot.handlers.quality import handle_quality_selection, parse_quality_callback
 from core.cache import Database
 from core.config import Settings
-from core.messages import QUALITY_EXPIRED, QUALITY_NOT_YOURS, QUALITY_SELECTED
+from core.messages import (
+    AUDIO_SELECTED,
+    QUALITY_EXPIRED,
+    QUALITY_NOT_YOURS,
+    QUALITY_SELECTED,
+)
 from core.pending import PendingDownload, store_pending_download
 from tests.test_pending import FakeRedis
 
@@ -18,7 +23,7 @@ URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 CHAT_ID = -100123
 
 
-def _callback(token: str, height: int, *, user_id: int = 7) -> SimpleNamespace:
+def _callback(token: str, height: int | str, *, user_id: int = 7) -> SimpleNamespace:
     return SimpleNamespace(
         data=f"tyq:{token}:{height}",
         from_user=SimpleNamespace(id=user_id),
@@ -44,11 +49,23 @@ class KeyboardTests(unittest.TestCase):
             # Telegram rejects callback data longer than 64 bytes.
             self.assertLessEqual(len(button.callback_data.encode()), 64)
 
+    def test_keyboard_has_audio_button_below_the_qualities(self) -> None:
+        keyboard = quality_keyboard("abcdef012345")
+        self.assertEqual(len(keyboard.inline_keyboard), 2)
+        audio_row = keyboard.inline_keyboard[1]
+        self.assertEqual(len(audio_row), 1)
+        self.assertEqual(audio_row[0].callback_data, "tyq:abcdef012345:audio")
+        self.assertLessEqual(len(audio_row[0].callback_data.encode()), 64)
+
 
 class ParseCallbackTests(unittest.TestCase):
     def test_valid_and_invalid_callback_data(self) -> None:
         self.assertEqual(
             parse_quality_callback("tyq:abcdef012345:480"), ("abcdef012345", 480)
+        )
+        # Audio is a selection too, represented by a None height.
+        self.assertEqual(
+            parse_quality_callback("tyq:abcdef012345:audio"), ("abcdef012345", None)
         )
         for bad in (None, "", "tyq:", "tyq:abc", "tyq:abc:1440", "tyq:abc:xyz",
                     "other:abc:480", "tyq:abc:480:extra"):
@@ -135,6 +152,36 @@ class QualitySelectionTests(unittest.IsolatedAsyncioTestCase):
                 QUALITY_EXPIRED, show_alert=True
             )
             queue.enqueue_job.assert_not_awaited()
+
+    async def test_audio_selection_enqueues_audio_job(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            db, redis, token = await self._setup(temp)
+            queue = SimpleNamespace(enqueue_job=AsyncMock())
+            callback = _callback(token, "audio")
+            await handle_quality_selection(
+                callback, queue=queue, settings=Settings(), db=db, redis=redis
+            )
+            queue.enqueue_job.assert_awaited_once()
+            kwargs = queue.enqueue_job.call_args.kwargs
+            self.assertTrue(kwargs["audio_only"])
+            self.assertEqual(kwargs["quality"], "audio")
+            self.assertEqual(kwargs["url"], URL)
+            callback.message.edit_text.assert_awaited_once_with(AUDIO_SELECTED)
+
+    async def test_cached_audio_is_sent_without_queueing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            db, redis, token = await self._setup(temp)
+            await db.store_cached(URL, "audio", "cached-audio", "audio")
+            queue = SimpleNamespace(enqueue_job=AsyncMock())
+            callback = _callback(token, "audio")
+            await handle_quality_selection(
+                callback, queue=queue, settings=Settings(), db=db, redis=redis
+            )
+            queue.enqueue_job.assert_not_awaited()
+            callback.bot.send_audio.assert_awaited_once()
+            self.assertEqual(
+                callback.bot.send_audio.await_args.kwargs["audio"], "cached-audio"
+            )
 
     async def test_cached_quality_is_sent_without_queueing(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

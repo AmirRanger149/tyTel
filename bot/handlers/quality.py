@@ -11,6 +11,7 @@ from redis.asyncio import Redis
 from core.cache import Database
 from core.config import Settings
 from core.messages import (
+    AUDIO_SELECTED,
     QUALITY_EXPIRED,
     QUALITY_INVALID,
     QUALITY_NOT_YOURS,
@@ -24,14 +25,20 @@ logger = logging.getLogger(__name__)
 router = Router(name="quality")
 
 
-def parse_quality_callback(data: str | None) -> tuple[str, int] | None:
-    """Parse ``tyq:<token>:<height>`` callback data, or None if invalid."""
+def parse_quality_callback(data: str | None) -> tuple[str, int | None] | None:
+    """Parse ``tyq:<token>:<selection>`` callback data, or None if invalid.
+
+    The selection is a video height (``1080``, ``720``, ...) or the
+    literal ``audio`` for audio-only, which is returned as height None.
+    """
 
     if not data:
         return None
     parts = data.split(":")
     if len(parts) != 3 or parts[0] != "tyq":
         return None
+    if parts[2] == "audio":
+        return parts[1], None
     try:
         height = int(parts[2])
     except ValueError:
@@ -75,7 +82,7 @@ async def handle_quality_selection(
         return
 
     group_settings = await db.get_group_settings(peeked.chat_id)
-    if not group_settings.enabled or group_settings.audio_only:
+    if not group_settings.enabled:
         await callback.answer(QUALITY_EXPIRED, show_alert=True)
         return
 
@@ -86,7 +93,8 @@ async def handle_quality_selection(
         await callback.answer(QUALITY_EXPIRED, show_alert=True)
         return
 
-    quality = cache_quality(audio_only=False, max_height=height)
+    audio_only = height is None
+    quality = cache_quality(audio_only=audio_only, max_height=height)
     cached = await db.get_cached(pending.url, quality)
     if cached:
         try:
@@ -109,7 +117,7 @@ async def handle_quality_selection(
             message_id=pending.message_id,
             user_id=pending.user_id,
             url=pending.url,
-            audio_only=False,
+            audio_only=audio_only,
             quality=quality,
             max_duration=pending.max_duration,
         )
@@ -122,12 +130,14 @@ async def handle_quality_selection(
     await _confirm_selection(callback, height)
 
 
-async def _confirm_selection(callback: CallbackQuery, height: int) -> None:
+async def _confirm_selection(callback: CallbackQuery, height: int | None) -> None:
     await callback.answer()
     if callback.message is not None:
         try:
             await callback.message.edit_text(
-                QUALITY_SELECTED.format(height=height)
+                AUDIO_SELECTED
+                if height is None
+                else QUALITY_SELECTED.format(height=height)
             )
         except TelegramBadRequest:
             # The prompt may already have been edited or deleted; the

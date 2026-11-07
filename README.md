@@ -5,11 +5,11 @@ A multi-group Telegram bot that replies with media from YouTube and Instagram li
 ## Features
 
 - YouTube videos, Shorts, embeds and live-page URLs (live broadcasts are rejected), plus Instagram posts, reels, TV and stories supported by yt-dlp.
-- **Per-link video quality selection:** after sending a link, the sender picks **1080p, 720p, 480p or 360p** from an inline keyboard before anything is downloaded. Only the sender can pick, the prompt expires after `QUALITY_PROMPT_TTL_SECONDS` (default 10 minutes), a selection can be used only once, and each quality is cached separately. Audio-only groups skip the prompt and download immediately, as before.
+- **Per-link quality selection:** after sending a link, the sender picks **1080p, 720p, 480p or 360p** — or **audio only (MP3)**, on a button below the qualities — from an inline keyboard before anything is downloaded. Only the sender can pick, the prompt expires after `QUALITY_PROMPT_TTL_SECONDS` (default 10 minutes), a selection can be used only once, and each quality (audio included) is cached separately.
 - Strict domain allowlist, URL normalization, `noplaylist`, a 10-minute default duration limit, and 1080p maximum video format.
 - Redis queue, per-URL download locks, fixed-window per-user rate limiting (5 links/minute), and optional per-group limiting.
 - SQLite cache keyed by normalized URL and quality, with Telegram `file_id` reuse.
-- Per-group enable/disable, maximum duration, and audio-only settings.
+- Per-group enable/disable and maximum duration settings.
 - At most two retries after the initial attempt, with exponential backoff only for transient network, server, ffmpeg, or Telegram failures. Authentication, private/unavailable, restricted, unsupported, oversized, and permission failures stop immediately.
 - Temporary files are removed in a worker `finally` block. yt-dlp writes only to a per-job mode-600 cookie copy; the mounted source stays read-only.
 - Deno and `yt-dlp[default]` (including the JavaScript challenge solver) are installed in the worker image.
@@ -65,10 +65,8 @@ The `app-data` volume retains cache and group settings. Redis uses append-only p
 | `/disable` | Group admins | Ignore links until re-enabled. |
 | `/settings` | Anyone in the group | Show current settings and command syntax. |
 | `/settings duration 300` | Group admins | Set maximum duration in seconds (30 up to the global limit). |
-| `/settings audio on` | Group admins | Download and cache MP3 audio only. |
-| `/settings audio off` | Group admins | Restore video mode. |
 
-Audio and video use separate cache entries. A group's duration can lower, but not raise, the global `MAX_DURATION_SECONDS` safety limit.
+Audio is no longer a group setting: it is a per-link choice in the quality prompt (the 🎵 button below the video qualities). Audio and each video quality use separate cache entries. A group's duration can lower, but not raise, the global `MAX_DURATION_SECONDS` safety limit. Groups that previously had audio-only enabled simply get the selection prompt like everyone else; the old `audio_only` database column, if present, is ignored.
 
 ## Configuration
 

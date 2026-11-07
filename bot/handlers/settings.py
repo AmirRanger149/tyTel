@@ -12,12 +12,7 @@ router = Router(name="group-settings")
 router.message.filter(F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}))
 
 ADMIN_ONLY = "فقط مدیران گروه می‌توانند این تنظیم را تغییر دهند."
-INVALID_SETTINGS = (
-    "فرمت دستور:\n"
-    "/settings duration 300\n"
-    "/settings audio on\n"
-    "/settings audio off"
-)
+INVALID_SETTINGS = "فرمت دستور:\n/settings duration 300"
 
 
 async def _is_admin(message: Message) -> bool:
@@ -52,10 +47,9 @@ async def group_settings(
     parts = (message.text or "").split()
     if len(parts) == 1:
         duration = group_settings.max_duration or settings.max_duration_seconds
-        audio = "روشن" if group_settings.audio_only else "خاموش"
         enabled = "فعال" if group_settings.enabled else "غیرفعال"
         await message.reply(
-            f"وضعیت: {enabled}\nحداکثر مدت: {duration} ثانیه\nحالت فقط آهنگ: {audio}\n\n"
+            f"وضعیت: {enabled}\nحداکثر مدت: {duration} ثانیه\n\n"
             + INVALID_SETTINGS
         )
         return
@@ -83,9 +77,4 @@ async def group_settings(
         await message.reply(f"حداکثر مدت روی {seconds} ثانیه تنظیم شد.")
         return
 
-    if setting == "audio" and value in {"on", "off", "روشن", "خاموش"}:
-        audio_only = value in {"on", "روشن"}
-        await db.set_group_audio_only(message.chat.id, audio_only)
-        await message.reply("فقط آهنگ " + ("روشن شد." if audio_only else "خاموش شد."))
-        return
     await message.reply(INVALID_SETTINGS)

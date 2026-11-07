@@ -33,7 +33,7 @@ async def enable_group(message: Message, db: Database) -> None:
         await message.reply(ADMIN_ONLY)
         return
     await db.set_group_enabled(message.chat.id, True)
-    await message.reply("ربات در این گروه فعال شد.")
+    await message.reply("ربات با توکل به خدا فعال شد.")
 
 
 @router.message(Command("disable"))
@@ -55,7 +55,7 @@ async def group_settings(
         audio = "روشن" if group_settings.audio_only else "خاموش"
         enabled = "فعال" if group_settings.enabled else "غیرفعال"
         await message.reply(
-            f"وضعیت: {enabled}\nحداکثر مدت: {duration} ثانیه\nحالت فقط صوت: {audio}\n\n"
+            f"وضعیت: {enabled}\nحداکثر مدت: {duration} ثانیه\nحالت فقط آهنگ: {audio}\n\n"
             + INVALID_SETTINGS
         )
         return
@@ -86,6 +86,6 @@ async def group_settings(
     if setting == "audio" and value in {"on", "off", "روشن", "خاموش"}:
         audio_only = value in {"on", "روشن"}
         await db.set_group_audio_only(message.chat.id, audio_only)
-        await message.reply("حالت فقط صوت " + ("روشن شد." if audio_only else "خاموش شد."))
+        await message.reply("فقط آهنگ " + ("روشن شد." if audio_only else "خاموش شد."))
         return
     await message.reply(INVALID_SETTINGS)

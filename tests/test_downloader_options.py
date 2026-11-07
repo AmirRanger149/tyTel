@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from core.config import Settings
+from core.url_utils import video_format
 from worker.downloader import MediaDownloader
 
 
@@ -35,10 +36,7 @@ class DownloaderOptionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             downloader = MediaDownloader(Settings())
             options = downloader._options(Path(temp), False, max_height=360)
-            self.assertEqual(
-                options["format"],
-                "bestvideo[height<=360]+bestaudio/best[height<=360]",
-            )
+            self.assertEqual(options["format"], video_format(360))
             self.assertNotIn("720", options["format"])
             options_1080 = downloader._options(Path(temp), False, max_height=1080)
             self.assertIn("height<=1080", options_1080["format"])

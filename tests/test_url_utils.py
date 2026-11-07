@@ -100,15 +100,116 @@ class QualityTests(unittest.TestCase):
 
     def test_video_format_caps_height(self) -> None:
         self.assertEqual(
-            video_format(480), "bestvideo[height<=480]+bestaudio/best[height<=480]"
-        )
-        self.assertEqual(
-            video_format(1080),
-            "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
+            video_format(480),
+            "bestvideo[height<=480][width>=480]+bestaudio"
+            "/best[width<=480][height>=480]"
+            "/bestvideo[width<=480]+bestaudio"
+            "/best[height<=480]"
+            "/bestvideo+bestaudio"
+            "/best",
         )
         self.assertIn("height<=720", video_format(720))
+        self.assertIn("width<=720", video_format(720))
+        self.assertTrue(video_format(1080).endswith("/best"))
         with self.assertRaises(ValueError):
             video_format(200)
+
+
+def _synthetic_format(format_id: str, width, height, vcodec: str, acodec: str, tbr: int) -> dict:
+    return {
+        "format_id": format_id,
+        "ext": "mp4",
+        "width": width,
+        "height": height,
+        "vcodec": vcodec,
+        "acodec": acodec,
+        "tbr": tbr,
+        "protocol": "https",
+        "url": "https://example.invalid/media",
+    }
+
+
+def _combined(width: int, height: int, tbr: int) -> dict:
+    return _synthetic_format(
+        f"c{width}x{height}", width, height, "avc1.640028", "mp4a.40.2", tbr
+    )
+
+
+def _video_only(width: int, height: int, tbr: int) -> dict:
+    return _synthetic_format(
+        f"v{width}x{height}", width, height, "avc1.640028", "none", tbr
+    )
+
+
+_AUDIO_ONLY = _synthetic_format("audio", None, None, "none", "mp4a.40.2", 128)
+
+
+def _select_format_id(selector: str, formats: list[dict]) -> str:
+    """Run yt-dlp's real format selection over synthetic formats."""
+
+    import yt_dlp
+
+    ydl = yt_dlp.YoutubeDL(
+        {"quiet": True, "no_warnings": True, "format": selector, "simulate": True}
+    )
+    info = {
+        "id": "x",
+        "title": "t",
+        "extractor": "test",
+        "extractor_key": "Test",
+        "webpage_url": "https://example.invalid/",
+        "formats": [dict(item) for item in formats],
+    }
+    result = ydl.process_video_result(info, download=False)
+    requested = result.get("requested_formats")
+    if requested:
+        return "+".join(item["format_id"] for item in requested)
+    return str(result.get("format_id"))
+
+
+class VideoFormatSelectionTests(unittest.TestCase):
+    """The selector must work for portrait (Instagram/Shorts) formats,
+    not just landscape ones: portrait frames report their long side as
+    the height, so a height-only cap can match nothing."""
+
+    def test_portrait_combined_formats_pick_width_capped_best(self) -> None:
+        formats = [
+            _combined(1080, 1920, 4000),
+            _combined(720, 1280, 2200),
+            _combined(480, 854, 1100),
+        ]
+        self.assertEqual(
+            _select_format_id(video_format(720), formats), "c720x1280"
+        )
+        self.assertEqual(
+            _select_format_id(video_format(480), formats), "c480x854"
+        )
+
+    def test_portrait_split_formats_pick_width_capped_best(self) -> None:
+        formats = [
+            _video_only(1080, 1920, 3800),
+            _video_only(720, 1280, 2000),
+            _video_only(480, 854, 1000),
+            _AUDIO_ONLY,
+        ]
+        self.assertEqual(
+            _select_format_id(video_format(720), formats), "v720x1280+audio"
+        )
+
+    def test_landscape_formats_still_pick_height_capped_best(self) -> None:
+        formats = [
+            _video_only(1920, 1080, 4500),
+            _video_only(1280, 720, 2500),
+            _video_only(854, 480, 1200),
+            _combined(1280, 720, 2600),
+            _AUDIO_ONLY,
+        ]
+        self.assertEqual(
+            _select_format_id(video_format(720), formats), "v1280x720+audio"
+        )
+        self.assertEqual(
+            _select_format_id(video_format(480), formats), "v854x480+audio"
+        )
 
 
 if __name__ == "__main__":

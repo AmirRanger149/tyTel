@@ -122,8 +122,38 @@ def parse_video_height(quality: str) -> int | None:
 
 
 def video_format(max_height: int) -> str:
-    """yt-dlp format selector capping video at ``max_height`` pixels."""
+    """yt-dlp format selector capping video quality at ``max_height``.
+
+    "720p" names the *short* side of the frame, so the cap has to work
+    in both orientations. A landscape video is capped by height, but a
+    portrait video (Instagram reels, YouTube Shorts) is capped by
+    width: a 720x1280 reel has height 1280, so a plain
+    ``[height<=720]`` filter matches nothing at all and yt-dlp aborts
+    with "Requested format is not available". The branches are:
+
+    1. split landscape formats under the height cap (the width floor
+       keeps portrait also-rans out of this branch),
+    2. combined portrait formats under the width cap,
+    3. split portrait formats under the width cap,
+    4. combined formats under the height cap,
+    5. uncapped fallbacks, so a download can never dead-end on format
+       selection alone.
+
+    Every filter uses the ``?`` form (``height<=?720``): when a format
+    carries no height/width metadata at all — some Instagram formats
+    don't — the filter passes instead of rejecting it, and the size
+    limit plus the ffmpeg compression step bound the result instead.
+    """
 
     if max_height not in VIDEO_HEIGHTS:
         raise ValueError(f"unsupported video height: {max_height}")
-    return f"bestvideo[height<={max_height}]+bestaudio/best[height<={max_height}]"
+    return (
+        f"bestvideo[height<=?{max_height}][width>=?{max_height}]+bestaudio"
+        f"/best[width<=?{max_height}][height>=?{max_height}]"
+        f"/bestvideo[width<=?{max_height}]+bestaudio"
+        f"/best[height<=?{max_height}]"
+        f"/bestvideo+bestaudio"
+        f"/bv*"
+        f"/b"
+        f"/best"
+    )

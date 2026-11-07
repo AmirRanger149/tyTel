@@ -36,14 +36,13 @@ class CacheTests(unittest.IsolatedAsyncioTestCase):
     async def test_group_settings_default_and_persist(self) -> None:
         defaults = await self.db.get_group_settings(-1001)
         self.assertTrue(defaults.enabled)
-        self.assertFalse(defaults.audio_only)
         self.assertIsNone(defaults.max_duration)
+        # Audio is a per-link choice, not a group setting anymore.
+        self.assertFalse(hasattr(defaults, "audio_only"))
         await self.db.set_group_enabled(-1001, False)
         await self.db.set_group_duration(-1001, 300)
-        await self.db.set_group_audio_only(-1001, True)
         updated = await self.db.get_group_settings(-1001)
         self.assertFalse(updated.enabled)
-        self.assertTrue(updated.audio_only)
         self.assertEqual(updated.max_duration, 300)
 
     async def test_stale_cache_entry_can_be_replaced_and_deleted(self) -> None:

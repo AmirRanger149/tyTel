@@ -5,8 +5,8 @@ A multi-group Telegram bot that replies with media from YouTube and Instagram li
 ## Features
 
 - YouTube videos, Shorts, embeds and live-page URLs (live broadcasts are rejected), plus Instagram posts, reels, TV and stories supported by yt-dlp.
-- **Per-link video quality selection:** after sending a link, the sender picks **720p, 480p or 360p** from an inline keyboard before anything is downloaded. Only the sender can pick, the prompt expires after `QUALITY_PROMPT_TTL_SECONDS` (default 10 minutes), a selection can be used only once, and each quality is cached separately. Audio-only groups skip the prompt and download immediately, as before.
-- Strict domain allowlist, URL normalization, `noplaylist`, a 10-minute default duration limit, and 720p maximum video format.
+- **Per-link video quality selection:** after sending a link, the sender picks **1080p, 720p, 480p or 360p** from an inline keyboard before anything is downloaded. Only the sender can pick, the prompt expires after `QUALITY_PROMPT_TTL_SECONDS` (default 10 minutes), a selection can be used only once, and each quality is cached separately. Audio-only groups skip the prompt and download immediately, as before.
+- Strict domain allowlist, URL normalization, `noplaylist`, a 10-minute default duration limit, and 1080p maximum video format.
 - Redis queue, per-URL download locks, fixed-window per-user rate limiting (5 links/minute), and optional per-group limiting.
 - SQLite cache keyed by normalized URL and quality, with Telegram `file_id` reuse.
 - Per-group enable/disable, maximum duration, and audio-only settings.
@@ -90,7 +90,7 @@ All settings come from `.env`; see `.env.example`.
 | `QUALITY_PROMPT_TTL_SECONDS` | `600` | How long a video-quality prompt stays tappable before the link must be resent. |
 | `DEDUP_LOCK_TIMEOUT_SECONDS` | `1800` | Redis lock lifetime for one normalized URL. |
 
-With the hosted Telegram Bot API, files above 50 MB are compressed with ffmpeg. Audio is reduced to 96 kbps; oversized video is encoded with H.264/AAC at 720p and, if necessary, 480p. Media that still exceeds the limit receives a Persian error instead of an upload attempt.
+With the hosted Telegram Bot API, files above 50 MB are compressed with ffmpeg. Audio is reduced to 96 kbps; oversized video is first re-encoded at the quality the user picked (so a 1080p pick stays 1080p at a fitting bitrate) and only then stepped down through the lower qualities if it still does not fit. Media that still exceeds the limit receives a Persian error instead of an upload attempt. Note this means a long 1080p video on the hosted API will often end up downscaled to fit 50 MB; use the local Bot API (2000 MB, below) when full 1080p delivery matters.
 
 ### Optional local Telegram Bot API (2 GB)
 

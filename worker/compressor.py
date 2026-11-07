@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 
 from core.sanitize import sanitize_message
+from core.url_utils import DEFAULT_VIDEO_HEIGHT, VIDEO_HEIGHTS
 from worker.errors import (
     DownloadError,
     MediaTooLarge,
@@ -22,7 +23,12 @@ class MediaCompressor:
         self.size_limit_bytes = size_limit_bytes
 
     async def compress_if_needed(
-        self, source: Path, *, media_type: str, duration: float | None
+        self,
+        source: Path,
+        *,
+        media_type: str,
+        duration: float | None,
+        max_height: int = DEFAULT_VIDEO_HEIGHT,
     ) -> Path:
         if source.stat().st_size <= self.size_limit_bytes:
             return source
@@ -30,7 +36,21 @@ class MediaCompressor:
             return await self._compress_audio(source)
         if not duration or not math.isfinite(duration) or duration <= 0:
             raise MediaTooLarge("cannot calculate a video bitrate")
-        return await self._compress_video(source, duration)
+        return await self._compress_video(source, duration, max_height=max_height)
+
+    @staticmethod
+    def compression_heights(max_height: int) -> tuple[int, ...]:
+        """Resolutions to try, highest first, never above the chosen quality.
+
+        Trying the chosen height first means an oversized 1080p download
+        is re-encoded at 1080p (at a fitting bitrate) before any downscale
+        is considered; lower rungs trade resolution for another chance to
+        fit the upload limit.
+        """
+
+        if max_height not in VIDEO_HEIGHTS:
+            raise ValueError(f"unsupported video height: {max_height}")
+        return tuple(h for h in VIDEO_HEIGHTS if h <= max_height)
 
     async def _run(self, arguments: list[str]) -> None:
         process = await asyncio.create_subprocess_exec(
@@ -61,17 +81,22 @@ class MediaCompressor:
         self._check_size(output)
         return output
 
-    async def _compress_video(self, source: Path, duration: float) -> Path:
+    async def _compress_video(
+        self, source: Path, duration: float, *, max_height: int = DEFAULT_VIDEO_HEIGHT
+    ) -> Path:
         output = source.with_name(f"{source.stem}-compressed.mp4")
-        # Two passes trade resolution for a second chance to fit the limit.
-        for attempt, max_height in enumerate((720, 480), start=1):
+        # Each pass trades resolution for another chance to fit the limit,
+        # starting at (and never exceeding) the quality the user picked.
+        for attempt, height in enumerate(
+            self.compression_heights(max_height), start=1
+        ):
             audio_bps = 96_000
             target_bps = int(self.size_limit_bytes * 8 * 0.92 / duration)
             video_bps = max(80_000, target_bps - audio_bps)
             await self._run(
                 [
                     "ffmpeg", "-y", "-i", str(source), "-map", "0:v:0", "-map", "0:a:0?",
-                    "-vf", f"scale=-2:'min({max_height},ih)'", "-c:v", "libx264",
+                    "-vf", f"scale=-2:'min({height},ih)'", "-c:v", "libx264",
                     "-preset", "veryfast", "-b:v", str(video_bps), "-maxrate", str(video_bps),
                     "-bufsize", str(video_bps * 2), "-c:a", "aac", "-b:a", "96k",
                     "-movflags", "+faststart", str(output),

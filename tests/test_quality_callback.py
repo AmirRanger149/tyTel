@@ -36,7 +36,9 @@ class KeyboardTests(unittest.TestCase):
     def test_keyboard_offers_each_height_within_callback_limit(self) -> None:
         keyboard = quality_keyboard("abcdef012345")
         buttons = keyboard.inline_keyboard[0]
-        self.assertEqual([b.text for b in buttons], ["720p", "480p", "360p"])
+        self.assertEqual(
+            [b.text for b in buttons], ["1080p", "720p", "480p", "360p"]
+        )
         for button in buttons:
             self.assertTrue(button.callback_data.startswith("tyq:abcdef012345:"))
             # Telegram rejects callback data longer than 64 bytes.
@@ -48,7 +50,7 @@ class ParseCallbackTests(unittest.TestCase):
         self.assertEqual(
             parse_quality_callback("tyq:abcdef012345:480"), ("abcdef012345", 480)
         )
-        for bad in (None, "", "tyq:", "tyq:abc", "tyq:abc:1080", "tyq:abc:xyz",
+        for bad in (None, "", "tyq:", "tyq:abc", "tyq:abc:1440", "tyq:abc:xyz",
                     "other:abc:480", "tyq:abc:480:extra"):
             with self.subTest(bad=bad):
                 self.assertIsNone(parse_quality_callback(bad))

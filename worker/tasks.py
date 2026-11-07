@@ -16,6 +16,7 @@ from core.config import Settings
 from core.messages import (
     ADMIN_COOKIE_WARNING,
     ERROR,
+    PHOTO_UNSUPPORTED,
     SERVICE_UNAVAILABLE,
     TOO_LARGE,
     TOO_LONG,
@@ -30,6 +31,7 @@ from worker.downloader import MediaDownloader
 from worker.errors import (
     MediaTooLarge,
     MediaTooLong,
+    PhotoPostUnsupported,
     UnsupportedMedia,
     is_authentication_error,
     is_retryable,
@@ -102,6 +104,8 @@ def _user_error(exc: BaseException) -> str:
         return TOO_LONG
     if isinstance(exc, MediaTooLarge):
         return TOO_LARGE
+    if isinstance(exc, PhotoPostUnsupported):
+        return PHOTO_UNSUPPORTED
     if isinstance(exc, UnsupportedMedia):
         return UNSUPPORTED
     return ERROR

@@ -20,9 +20,11 @@ from worker.errors import (
     MediaTooLarge,
     MediaTooLong,
     PermanentMediaError,
+    PhotoPostUnsupported,
     TransientMediaError,
     UnsupportedMedia,
     is_authentication_error,
+    is_photo_post_error,
     is_retryable,
 )
 
@@ -31,6 +33,7 @@ __all__ = [
     "MediaDownloader",
     "MediaTooLarge",
     "MediaTooLong",
+    "PhotoPostUnsupported",
     "UnsupportedMedia",
     "DownloadedMedia",
 ]
@@ -181,6 +184,8 @@ class MediaDownloader:
             )
             if is_authentication_error(exc):
                 raise AuthenticationRequired(message) from exc
+            if is_photo_post_error(exc):
+                raise PhotoPostUnsupported(message) from exc
             if is_retryable(exc):
                 raise TransientMediaError(message) from exc
             raise PermanentMediaError(message) from exc

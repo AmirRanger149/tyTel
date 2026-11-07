@@ -44,6 +44,29 @@ def _check_executable(name: str, hint: str) -> None:
         )
 
 
+def _has_instagram_session(content: bytes) -> bool:
+    """True when a Netscape cookie dump carries an Instagram sessionid.
+
+    Only the cookie's presence is reported — its value is never logged.
+    Netscape lines are tab-separated: domain, flag, path, secure,
+    expiry, name, value. Some exporters prefix cookie lines with
+    ``#HttpOnly_``; those lines are cookies, not comments.
+    """
+
+    for line in content.decode("utf-8", errors="ignore").splitlines():
+        if line.startswith("#HttpOnly_"):
+            line = line[len("#HttpOnly_"):]
+        elif line.startswith("#"):
+            continue
+        fields = line.split("\t")
+        if len(fields) != 7:
+            continue
+        domain, name, value = fields[0].lower(), fields[5], fields[6]
+        if domain.endswith("instagram.com") and name == "sessionid" and value:
+            return True
+    return False
+
+
 def _check_cookies(settings: Settings) -> None:
     path = settings.cookies_path
     try:
@@ -55,12 +78,27 @@ def _check_cookies(settings: Settings) -> None:
             )
             return
         with path.open("rb") as cookie_file:
-            header = cookie_file.read(512)
-        if header.startswith(NETSCAPE_HEADERS):
+            # Cookie files are small; the cap only guards against a
+            # mis-mounted large file being read whole at startup.
+            content = cookie_file.read(2_000_001)
+        if content[:512].startswith(NETSCAPE_HEADERS):
             logger.info(
                 "Startup check: cookies file present with a supported Netscape header",
                 extra={"event": "startup_cookies_valid"},
             )
+            if _has_instagram_session(content):
+                logger.info(
+                    "Startup check: Instagram session cookie found",
+                    extra={"event": "startup_instagram_session"},
+                )
+            else:
+                logger.warning(
+                    "Startup check: no Instagram session cookie in the cookies "
+                    "file; Instagram may reject downloads; fix: export cookies "
+                    "from a browser signed in to Instagram with a separate "
+                    "account and merge them into the same file",
+                    extra={"event": "startup_instagram_session_missing"},
+                )
         else:
             logger.warning(
                 "Startup check: cookies file has no supported Netscape header; fix: "

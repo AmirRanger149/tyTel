@@ -40,6 +40,39 @@ class StartupSelfCheckTests(unittest.TestCase):
             self.assertIn("ffprobe not found; fix:", output)
             self.assertIn("no supported Netscape header; fix:", output)
 
+    def test_instagram_session_cookie_is_reported_without_its_value(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            cookies = Path(temp) / "cookies.txt"
+            cookies.write_text(
+                "# Netscape HTTP Cookie File\n"
+                ".google.com\tTRUE\t/\tTRUE\t1893456000\tSID\tgoogle-secret\n"
+                ".instagram.com\tTRUE\t/\tTRUE\t1893456000\tsessionid\tig-secret-value\n"
+            )
+            with patch("worker.selfcheck.shutil.which", return_value="/usr/bin/tool"):
+                with self.assertLogs("worker.selfcheck", level=logging.INFO) as logs:
+                    run_startup_self_check(Settings(cookies_path=cookies))
+            output = "\n".join(logs.output)
+            self.assertIn("Instagram session cookie found", output)
+            self.assertNotIn("ig-secret-value", output)
+            self.assertNotIn("google-secret", output)
+
+    def test_cookies_without_instagram_session_warn_with_fix_hint(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            cookies = Path(temp) / "cookies.txt"
+            cookies.write_text(
+                "# Netscape HTTP Cookie File\n"
+                ".google.com\tTRUE\t/\tTRUE\t1893456000\tSID\tgoogle-secret\n"
+                # An Instagram cookie that is not a session must not count.
+                ".instagram.com\tTRUE\t/\tTRUE\t1893456000\tcsrftoken\ttoken-value\n"
+            )
+            with patch("worker.selfcheck.shutil.which", return_value="/usr/bin/tool"):
+                with self.assertLogs("worker.selfcheck", level=logging.INFO) as logs:
+                    run_startup_self_check(Settings(cookies_path=cookies))
+            output = "\n".join(logs.output)
+            self.assertIn("no Instagram session cookie", output)
+            self.assertIn("fix:", output)
+            self.assertNotIn("token-value", output)
+
     def test_missing_cookie_file_does_not_raise(self) -> None:
         with patch("worker.selfcheck.shutil.which", return_value="/usr/bin/tool"):
             with self.assertLogs("worker.selfcheck", level=logging.INFO) as logs:

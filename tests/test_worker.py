@@ -10,9 +10,9 @@ from arq import Retry
 
 from core.cache import Database
 from core.config import Settings
-from core.messages import ERROR
+from core.messages import ERROR, PHOTO_UNSUPPORTED
 from worker.downloader import DownloadError
-from worker.errors import TransientMediaError
+from worker.errors import PhotoPostUnsupported, TransientMediaError
 from worker.tasks import download_and_send
 
 
@@ -115,6 +115,35 @@ class WorkerRetryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 downloader.download.await_args.kwargs["max_height"], 480
             )
+
+    async def test_photo_post_failure_replies_with_photo_message(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            db = Database(root / "cache.db")
+            await db.initialize()
+            redis = Mock()
+            redis.lock.return_value = FakeLock()
+            send_message = AsyncMock()
+            downloader = SimpleNamespace(
+                download=AsyncMock(
+                    side_effect=PhotoPostUnsupported("no video in this post")
+                )
+            )
+            ctx = {
+                "bot": SimpleNamespace(send_message=send_message),
+                "db": db,
+                "redis": redis,
+                "downloader": downloader,
+                "settings": Settings(temp_dir=root / "tmp"),
+                "job_try": 3,
+            }
+            await download_and_send(
+                ctx, chat_id=-100123, message_id=42, user_id=7,
+                url="https://www.instagram.com/p/ABC123/",
+                audio_only=False, quality="video-720p", max_duration=600,
+            )
+            send_message.assert_awaited_once()
+            self.assertEqual(send_message.await_args.args[1], PHOTO_UNSUPPORTED)
 
     async def test_final_failure_replies_in_persian_and_cleans_up(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

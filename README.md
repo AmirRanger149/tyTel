@@ -4,7 +4,7 @@ A multi-group Telegram bot that replies with media from YouTube and Instagram li
 
 ## Features
 
-- YouTube videos, Shorts, embeds and live-page URLs (live broadcasts are rejected), plus Instagram posts, reels, TV and stories supported by yt-dlp.
+- YouTube videos, Shorts, embeds and live-page URLs (live broadcasts are rejected), plus Instagram reels and video posts supported by yt-dlp. Instagram **photo posts and photo carousels are not supported yet**: yt-dlp is a video extractor and refuses them during extraction, so they receive a dedicated Persian reply instead of the generic error. Stories are accepted by the URL filter but need valid Instagram cookies and expire after 24 hours.
 - **Per-link quality selection:** after sending a link, the sender picks **1080p, 720p, 480p or 360p** — or **audio only (MP3)**, on a button below the qualities — from an inline keyboard before anything is downloaded. Only the sender can pick, the prompt expires after `QUALITY_PROMPT_TTL_SECONDS` (default 10 minutes), a selection can be used only once, and each quality (audio included) is cached separately.
 - Strict domain allowlist, URL normalization, `noplaylist`, a 10-minute default duration limit, and 1080p maximum video format.
 - Redis queue, per-URL download locks, fixed-window per-user rate limiting (5 links/minute), and optional per-group limiting.
@@ -40,7 +40,9 @@ sudo chown 10001:10001 cookies.txt
 sudo chmod 600 cookies.txt
 ```
 
-For YouTube authentication, use a **separate Google account**, not your primary account. Open a Private/Incognito window, sign in to YouTube, visit `https://youtube.com/robots.txt`, then export a **Netscape-format** cookie file from that window to `./cookies.txt`. Close the Private window immediately after exporting. The same file can also support Instagram when valid Instagram cookies are present. Set `PROXY_URL` if yt-dlp needs a proxy.
+For YouTube authentication, use a **separate Google account**, not your primary account. Open a Private/Incognito window, sign in to YouTube, visit `https://youtube.com/robots.txt`, then export a **Netscape-format** cookie file from that window to `./cookies.txt`. Close the Private window immediately after exporting. Set `PROXY_URL` if yt-dlp needs a proxy.
+
+For Instagram, use a **separate Instagram account** the same way — do not use your personal account; Meta rate-limits and can challenge or restrict accounts that download. While the Private window is open, also sign in to Instagram, then export **one** Netscape file containing both sites' cookies: yt-dlp picks cookies per domain, so a single `cookies.txt` serves YouTube and Instagram together (if you export them separately, merge the two files' lines into one, keeping a single header line). The cookie that matters for Instagram is `sessionid` (with `ds_user_id` and `csrftoken` normally alongside it); the worker's startup self-check reports whether an Instagram `sessionid` is present in the mounted file, without logging its value. Anonymous reels often work without any cookies, but results vary by server IP, and stories or restricted content always need the session.
 
 ### 3. Start
 
@@ -129,6 +131,14 @@ The non-Docker worker's daily cron performs subsequent yt-dlp updates; run the u
 
 ## Troubleshooting
 
+### Instagram photo posts get a "not supported" reply
+
+That is expected for now. The post (or carousel) contains no video, and yt-dlp refuses it during extraction ("There is no video in this post"). Reels and video posts are unaffected. Photo/carousel support needs a separate image extractor and is planned separately.
+
+### Instagram says login is required or asks for a checkpoint
+
+Meta is rejecting the anonymous session or the current Instagram cookies. This is not retried, and the admin gets the same hourly cookie alert as for YouTube. Re-export cookies from a browser signed in to Instagram with the separate account (see above), replace `cookies.txt`, and recreate the worker. If the account itself was challenged or restricted in the Instagram app, clear the checkpoint there first — a challenged account keeps failing no matter how fresh the cookies are.
+
 ### Bot does not see links in a group
 
 Open BotFather, run `/setprivacy`, select the bot, and choose **Disable**. Remove and re-add the bot if Telegram does not apply the changed privacy mode to an existing group. Also confirm that `/enable` has been run and that the bot can read group messages.
@@ -164,7 +174,7 @@ No additional test framework is required:
 python -m unittest discover -v
 ```
 
-Tests cover YouTube/Instagram extraction and normalization, domain rejection, duration/playlist limits, read-only cookie copying and cleanup, log sanitization, retry classification, startup self-checks, admin alerts, SQLite cache and group settings, worker cache hits, user/group rate limiting, and video quality selection (quality parsing and format selection, one-shot pending prompts, and quality callbacks). Live Telegram and media-site integration require valid credentials, ffmpeg, network access to those services, and are therefore not part of the unit suite.
+Tests cover YouTube/Instagram extraction and normalization, domain rejection, duration/playlist limits, read-only cookie copying and cleanup, log sanitization, retry classification (including Instagram photo-post, checkpoint, and rate-limit messages), startup self-checks (including the Instagram session-cookie check), admin alerts, SQLite cache and group settings, worker cache hits, user/group rate limiting, and video quality selection (quality parsing and format selection, one-shot pending prompts, and quality callbacks). Live Telegram and media-site integration require valid credentials, ffmpeg, network access to those services, and are therefore not part of the unit suite.
 
 ## Architecture
 

@@ -9,9 +9,11 @@ from worker.errors import (
     AuthenticationRequired,
     MediaTooLarge,
     MediaTooLong,
+    PhotoPostUnsupported,
     TransientMediaError,
     UnsupportedMedia,
     is_authentication_error,
+    is_photo_post_error,
     is_retryable,
 )
 
@@ -49,6 +51,37 @@ class ErrorClassificationTests(unittest.TestCase):
             with self.subTest(exc=str(exc)):
                 self.assertTrue(is_retryable(exc))
         self.assertFalse(is_retryable(DownloadError("unknown extractor failure")))
+
+    def test_instagram_photo_post_errors(self) -> None:
+        for message in (
+            "ERROR: [Instagram] DOJWDMBCTTX: There is no video in this post",
+            "ERROR: [Instagram] Dc_FW3tDi12: No video formats found!",
+        ):
+            with self.subTest(message=message):
+                exc = DownloadError(message)
+                self.assertTrue(is_photo_post_error(exc))
+                self.assertFalse(is_retryable(exc))
+        # The same phrasing without the Instagram extractor is not
+        # treated as a photo post.
+        self.assertFalse(
+            is_photo_post_error(DownloadError("There is no video in this post"))
+        )
+        self.assertTrue(is_photo_post_error(PhotoPostUnsupported("photo")))
+
+    def test_instagram_checkpoint_and_rate_limit(self) -> None:
+        self.assertTrue(
+            is_authentication_error(
+                DownloadError("[Instagram] checkpoint_required: login required")
+            )
+        )
+        self.assertTrue(
+            is_retryable(
+                DownloadError(
+                    "Instagram rate limit: please wait a few minutes "
+                    "before you try again"
+                )
+            )
+        )
 
     def test_authentication_is_detected_separately(self) -> None:
         self.assertTrue(is_authentication_error(AuthenticationRequired("sign in")))

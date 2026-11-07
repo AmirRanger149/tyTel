@@ -31,6 +31,18 @@ class DownloaderOptionTests(unittest.TestCase):
             self.assertEqual(options["proxy"], settings.proxy_url)
             self.assertNotIn("cookiefile", repr({k: v for k, v in options.items() if k != "cookiefile"}))
 
+    def test_selected_height_changes_format_selector(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            downloader = MediaDownloader(Settings())
+            options = downloader._options(Path(temp), False, max_height=360)
+            self.assertEqual(
+                options["format"],
+                "bestvideo[height<=360]+bestaudio/best[height<=360]",
+            )
+            self.assertNotIn("720", options["format"])
+            with self.assertRaises(ValueError):
+                downloader._options(Path(temp), False, max_height=1080)
+
     def test_empty_cookie_file_is_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             cookies = Path(temp) / "cookies.txt"

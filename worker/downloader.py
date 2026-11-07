@@ -13,6 +13,7 @@ import yt_dlp
 
 from core.config import Settings
 from core.sanitize import sanitize_message, settings_secrets
+from core.url_utils import DEFAULT_VIDEO_HEIGHT, video_format
 from worker.errors import (
     AuthenticationRequired,
     DownloadError,
@@ -75,7 +76,13 @@ class MediaDownloader:
         )
 
     async def download(
-        self, url: str, directory: Path, *, audio_only: bool, max_duration: int
+        self,
+        url: str,
+        directory: Path,
+        *,
+        audio_only: bool,
+        max_duration: int,
+        max_height: int = DEFAULT_VIDEO_HEIGHT,
     ) -> DownloadedMedia:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
@@ -86,6 +93,7 @@ class MediaDownloader:
                 directory,
                 audio_only=audio_only,
                 max_duration=max_duration,
+                max_height=max_height,
             ),
         )
 
@@ -94,6 +102,8 @@ class MediaDownloader:
         directory: Path,
         audio_only: bool,
         cookie_file: Path | None = None,
+        *,
+        max_height: int = DEFAULT_VIDEO_HEIGHT,
     ) -> dict[str, Any]:
         options: dict[str, Any] = {
             "noplaylist": True,
@@ -103,9 +113,7 @@ class MediaDownloader:
             "outtmpl": str(directory / "%(title).80B-%(id)s.%(ext)s"),
             "restrictfilenames": True,
             "format": (
-                "bestaudio/best"
-                if audio_only
-                else "bestvideo[height<=720]+bestaudio/best[height<=720]"
+                "bestaudio/best" if audio_only else video_format(max_height)
             ),
             "socket_timeout": 30,
             "retries": 2,
@@ -143,13 +151,19 @@ class MediaDownloader:
         return destination
 
     def _download_sync(
-        self, url: str, directory: Path, *, audio_only: bool, max_duration: int
+        self,
+        url: str,
+        directory: Path,
+        *,
+        audio_only: bool,
+        max_duration: int,
+        max_height: int = DEFAULT_VIDEO_HEIGHT,
     ) -> DownloadedMedia:
         directory.mkdir(parents=True, exist_ok=True)
         cookie_file = self._copy_cookies(directory)
         try:
             with yt_dlp.YoutubeDL(
-                self._options(directory, audio_only, cookie_file)
+                self._options(directory, audio_only, cookie_file, max_height=max_height)
             ) as ydl:
                 info = ydl.extract_info(url, download=False)
                 self._validate_info(info, max_duration)

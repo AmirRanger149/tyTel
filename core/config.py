@@ -32,6 +32,9 @@ class Settings(BaseSettings):
         default=1800, ge=30, alias="DEDUP_LOCK_TIMEOUT_SECONDS"
     )
     job_timeout_seconds: int = Field(default=1800, ge=60, alias="JOB_TIMEOUT_SECONDS")
+    quality_prompt_ttl_seconds: int = Field(
+        default=600, ge=60, le=3600, alias="QUALITY_PROMPT_TTL_SECONDS"
+    )
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
     @field_validator("local_bot_api_url", "proxy_url", mode="before")

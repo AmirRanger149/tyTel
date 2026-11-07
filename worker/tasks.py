@@ -24,6 +24,7 @@ from core.messages import (
 from core.redis import lock_key
 from core.sanitize import sanitize_message, settings_secrets
 from core.telegram import send_cached_media, send_local_media, sent_file_id
+from core.url_utils import DEFAULT_VIDEO_HEIGHT, parse_video_height
 from worker.compressor import MediaCompressor
 from worker.downloader import MediaDownloader
 from worker.errors import (
@@ -148,7 +149,14 @@ async def download_and_send(
             )
             downloader: MediaDownloader = ctx["downloader"]
             media = await downloader.download(
-                url, directory, audio_only=audio_only, max_duration=max_duration
+                url,
+                directory,
+                audio_only=audio_only,
+                max_duration=max_duration,
+                # The quality string is the cache key and the download cap
+                # in one: "video-480p" downloads at most 480p. Audio and
+                # legacy/unparseable qualities fall back to the default.
+                max_height=parse_video_height(quality) or DEFAULT_VIDEO_HEIGHT,
             )
             compressor: MediaCompressor = ctx["compressor"]
             output = await compressor.compress_if_needed(

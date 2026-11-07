@@ -88,6 +88,34 @@ class WorkerRetryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(list((root / "tmp").iterdir()), [])
             send_message.assert_not_awaited()
 
+    async def test_selected_quality_forwards_max_height_to_downloader(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            db = Database(root / "cache.db")
+            await db.initialize()
+            redis = Mock()
+            redis.lock.return_value = FakeLock()
+            downloader = SimpleNamespace(
+                download=AsyncMock(side_effect=TransientMediaError("network timeout"))
+            )
+            ctx = {
+                "bot": SimpleNamespace(send_message=AsyncMock()),
+                "db": db,
+                "redis": redis,
+                "downloader": downloader,
+                "settings": Settings(temp_dir=root / "tmp"),
+                "job_try": 1,
+            }
+            with self.assertRaises(Retry):
+                await download_and_send(
+                    ctx, chat_id=-100123, message_id=42, user_id=7,
+                    url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                    audio_only=False, quality="video-480p", max_duration=600,
+                )
+            self.assertEqual(
+                downloader.download.await_args.kwargs["max_height"], 480
+            )
+
     async def test_final_failure_replies_in_persian_and_cleans_up(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

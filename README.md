@@ -5,6 +5,7 @@ A multi-group Telegram bot that replies with media from YouTube and Instagram li
 ## Features
 
 - YouTube videos, Shorts, embeds and live-page URLs (live broadcasts are rejected), plus Instagram posts, reels, TV and stories supported by yt-dlp.
+- **Per-link video quality selection:** after sending a link, the sender picks **720p, 480p or 360p** from an inline keyboard before anything is downloaded. Only the sender can pick, the prompt expires after `QUALITY_PROMPT_TTL_SECONDS` (default 10 minutes), a selection can be used only once, and each quality is cached separately. Audio-only groups skip the prompt and download immediately, as before.
 - Strict domain allowlist, URL normalization, `noplaylist`, a 10-minute default duration limit, and 720p maximum video format.
 - Redis queue, per-URL download locks, fixed-window per-user rate limiting (5 links/minute), and optional per-group limiting.
 - SQLite cache keyed by normalized URL and quality, with Telegram `file_id` reuse.
@@ -86,6 +87,7 @@ All settings come from `.env`; see `.env.example`.
 | `PROXY_URL` | empty | Optional proxy passed directly to yt-dlp. |
 | `ADMIN_CHAT_ID` | empty | Private chat/user ID for a cookie-expiry warning, rate limited to one message per hour. |
 | `JOB_TIMEOUT_SECONDS` | `1800` | Maximum arq job runtime. |
+| `QUALITY_PROMPT_TTL_SECONDS` | `600` | How long a video-quality prompt stays tappable before the link must be resent. |
 | `DEDUP_LOCK_TIMEOUT_SECONDS` | `1800` | Redis lock lifetime for one normalized URL. |
 
 With the hosted Telegram Bot API, files above 50 MB are compressed with ffmpeg. Audio is reduced to 96 kbps; oversized video is encoded with H.264/AAC at 720p and, if necessary, 480p. Media that still exceeds the limit receives a Persian error instead of an upload attempt.
@@ -164,15 +166,15 @@ No additional test framework is required:
 python -m unittest discover -v
 ```
 
-Tests cover YouTube/Instagram extraction and normalization, domain rejection, duration/playlist limits, read-only cookie copying and cleanup, log sanitization, retry classification, startup self-checks, admin alerts, SQLite cache and group settings, worker cache hits, and user/group rate limiting. Live Telegram and media-site integration require valid credentials, ffmpeg, network access to those services, and are therefore not part of the unit suite.
+Tests cover YouTube/Instagram extraction and normalization, domain rejection, duration/playlist limits, read-only cookie copying and cleanup, log sanitization, retry classification, startup self-checks, admin alerts, SQLite cache and group settings, worker cache hits, user/group rate limiting, and video quality selection (quality parsing and format selection, one-shot pending prompts, and quality callbacks). Live Telegram and media-site integration require valid credentials, ffmpeg, network access to those services, and are therefore not part of the unit suite.
 
 ## Architecture
 
 ```text
 Telegram groups -> bot (long polling)
-                      | validate, settings, rate limit, cache lookup
+                      | validate, settings, rate limit, quality prompt
                       v
-                    Redis <---- per-URL locks / retry metadata
+                    Redis <---- per-URL locks / retry metadata / pending quality picks
                       |
                       v
                arq worker(s) -> yt-dlp -> ffmpeg (if needed) -> Telegram

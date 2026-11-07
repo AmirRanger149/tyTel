@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import unittest
 
-from core.url_utils import extract_urls, normalize_url
+from core.url_utils import (
+    cache_quality,
+    extract_urls,
+    normalize_url,
+    parse_video_height,
+    video_format,
+)
 
 
 class YouTubeUrlTests(unittest.TestCase):
@@ -70,6 +76,32 @@ class YouTubeUrlTests(unittest.TestCase):
 
     def test_ignores_non_urls_and_unsupported_domains(self) -> None:
         self.assertEqual(extract_urls("hello https://example.com/video"), [])
+
+
+class QualityTests(unittest.TestCase):
+    def test_cache_quality_per_height(self) -> None:
+        self.assertEqual(cache_quality(True), "audio")
+        self.assertEqual(cache_quality(False), "video-720p")
+        self.assertEqual(cache_quality(False, 480), "video-480p")
+        self.assertEqual(cache_quality(False, 360), "video-360p")
+        with self.assertRaises(ValueError):
+            cache_quality(False, 1080)
+
+    def test_parse_video_height(self) -> None:
+        self.assertEqual(parse_video_height("video-720p"), 720)
+        self.assertEqual(parse_video_height("video-480p"), 480)
+        self.assertIsNone(parse_video_height("video-1080p"))
+        self.assertIsNone(parse_video_height("audio"))
+        self.assertIsNone(parse_video_height(""))
+        self.assertIsNone(parse_video_height("video-abc"))
+
+    def test_video_format_caps_height(self) -> None:
+        self.assertEqual(
+            video_format(480), "bestvideo[height<=480]+bestaudio/best[height<=480]"
+        )
+        self.assertIn("height<=720", video_format(720))
+        with self.assertRaises(ValueError):
+            video_format(200)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,13 @@ INSTAGRAM_PATH_RE = re.compile(
 ALLOWED_DOMAINS = frozenset({"youtube.com", "youtu.be", "instagram.com"})
 TRAILING_PUNCTUATION = ".,!?;:،؛"
 
+# Video heights (in pixels) the user can pick after sending a link.
+# 720 stays the maximum, matching the documented safety/upload cap;
+# the lower options trade sharpness for a smaller, faster download.
+VIDEO_HEIGHTS: tuple[int, ...] = (720, 480, 360)
+DEFAULT_VIDEO_HEIGHT = VIDEO_HEIGHTS[0]
+_VIDEO_QUALITY_RE = re.compile(r"^video-(\d+)p$")
+
 
 def _domain_matches(hostname: str, domain: str) -> bool:
     return hostname == domain or hostname.endswith(f".{domain}")
@@ -84,5 +91,34 @@ def extract_urls(text: str | None) -> list[str]:
     return normalized
 
 
-def cache_quality(audio_only: bool) -> str:
-    return "audio" if audio_only else "video-720p"
+def cache_quality(audio_only: bool, max_height: int | None = None) -> str:
+    """Cache key for one quality: each height is cached separately."""
+
+    if audio_only:
+        return "audio"
+    height = DEFAULT_VIDEO_HEIGHT if max_height is None else max_height
+    if height not in VIDEO_HEIGHTS:
+        raise ValueError(f"unsupported video height: {height}")
+    return f"video-{height}p"
+
+
+def parse_video_height(quality: str) -> int | None:
+    """Return the height encoded in a ``video-<height>p`` quality, or None.
+
+    None is returned for audio, legacy, and malformed quality strings, so
+    callers can fall back to DEFAULT_VIDEO_HEIGHT.
+    """
+
+    match = _VIDEO_QUALITY_RE.fullmatch(quality or "")
+    if not match:
+        return None
+    height = int(match.group(1))
+    return height if height in VIDEO_HEIGHTS else None
+
+
+def video_format(max_height: int) -> str:
+    """yt-dlp format selector capping video at ``max_height`` pixels."""
+
+    if max_height not in VIDEO_HEIGHTS:
+        raise ValueError(f"unsupported video height: {max_height}")
+    return f"bestvideo[height<={max_height}]+bestaudio/best[height<={max_height}]"

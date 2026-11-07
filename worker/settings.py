@@ -12,6 +12,7 @@ from core.redis import arq_redis_settings
 from worker.compressor import MediaCompressor
 from worker.downloader import MediaDownloader
 from worker.maintenance import update_ytdlp
+from worker.selfcheck import run_startup_self_check
 from worker.tasks import download_and_send
 
 settings = get_settings()
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 async def startup(ctx: dict[str, Any]) -> None:
     from bot.factory import create_bot
 
+    run_startup_self_check(settings)
     ctx["settings"] = settings
     ctx["db"] = Database(settings.database_path)
     await ctx["db"].initialize()

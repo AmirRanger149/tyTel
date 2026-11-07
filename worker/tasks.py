@@ -12,22 +12,54 @@ from aiogram.exceptions import TelegramBadRequest
 from arq import Retry
 
 from core.cache import Database
-from core.messages import ERROR, TOO_LARGE, TOO_LONG, UNSUPPORTED
+from core.config import Settings
+from core.messages import (
+    ADMIN_COOKIE_WARNING,
+    ERROR,
+    SERVICE_UNAVAILABLE,
+    TOO_LARGE,
+    TOO_LONG,
+    UNSUPPORTED,
+)
 from core.redis import lock_key
+from core.sanitize import sanitize_message, settings_secrets
 from core.telegram import send_cached_media, send_local_media, sent_file_id
 from worker.compressor import MediaCompressor
-from worker.downloader import (
-    MediaDownloader,
+from worker.downloader import MediaDownloader
+from worker.errors import (
     MediaTooLarge,
     MediaTooLong,
     UnsupportedMedia,
+    is_authentication_error,
+    is_retryable,
 )
 
 logger = logging.getLogger(__name__)
 MAX_TRIES = 3
+ADMIN_COOKIE_NOTICE_KEY = "tytel:admin:cookie-expiry-notice"
 
 
-async def _reply_failure(bot: Bot, chat_id: int, message_id: int, text: str) -> None:
+def _secrets(settings: Settings) -> tuple[str, ...]:
+    return settings_secrets(
+        (settings.bot_token, settings.cookies_path, settings.proxy_url)
+    )
+
+
+def _log_error(
+    event: str, exc: BaseException, settings: Settings, **context: Any
+) -> None:
+    logger.error(
+        "%s (%s): %s",
+        event,
+        type(exc).__name__,
+        sanitize_message(exc, _secrets(settings)),
+        extra={"event": event, **context},
+    )
+
+
+async def _reply_failure(
+    bot: Bot, chat_id: int, message_id: int, text: str, settings: Settings
+) -> None:
     try:
         await bot.send_message(
             chat_id,
@@ -35,8 +67,43 @@ async def _reply_failure(bot: Bot, chat_id: int, message_id: int, text: str) -> 
             reply_to_message_id=message_id,
             allow_sending_without_reply=True,
         )
-    except Exception:
-        logger.exception("could not send failure notice", extra={"event": "error_reply_failed"})
+    except Exception as exc:
+        _log_error("error_reply_failed", exc, settings, chat_id=chat_id)
+
+
+async def _notify_cookie_expiry(
+    ctx: dict[str, Any], settings: Settings
+) -> None:
+    if settings.admin_chat_id is None:
+        logger.warning(
+            "authentication failed; admin notifications are disabled",
+            extra={"event": "cookie_expiry_admin_unconfigured"},
+        )
+        return
+    try:
+        should_notify = await ctx["redis"].set(
+            ADMIN_COOKIE_NOTICE_KEY, "1", ex=3600, nx=True
+        )
+        if should_notify:
+            await ctx["bot"].send_message(
+                settings.admin_chat_id, ADMIN_COOKIE_WARNING
+            )
+            logger.info(
+                "admin cookie expiry notice sent",
+                extra={"event": "cookie_expiry_admin_notified"},
+            )
+    except Exception as exc:
+        _log_error("cookie_expiry_admin_notice_failed", exc, settings)
+
+
+def _user_error(exc: BaseException) -> str:
+    if isinstance(exc, MediaTooLong):
+        return TOO_LONG
+    if isinstance(exc, MediaTooLarge):
+        return TOO_LARGE
+    if isinstance(exc, UnsupportedMedia):
+        return UNSUPPORTED
+    return ERROR
 
 
 async def download_and_send(
@@ -51,7 +118,7 @@ async def download_and_send(
     max_duration: int,
 ) -> None:
     bot: Bot = ctx["bot"]
-    settings = ctx["settings"]
+    settings: Settings = ctx["settings"]
     db: Database = ctx["db"]
     attempt = int(ctx.get("job_try", 1))
     directory: Path | None = None
@@ -105,31 +172,28 @@ async def download_and_send(
                 "media delivered",
                 extra={"event": "media_delivered", "chat_id": chat_id, "attempt": attempt},
             )
-    except (MediaTooLong, UnsupportedMedia, MediaTooLarge) as exc:
-        text = (
-            TOO_LONG
-            if isinstance(exc, MediaTooLong)
-            else TOO_LARGE
-            if isinstance(exc, MediaTooLarge)
-            else UNSUPPORTED
-        )
-        await _reply_failure(bot, chat_id, message_id, text)
     except Exception as exc:
-        if attempt < MAX_TRIES:
-            delay = 2**attempt
-            logger.warning(
-                "media job failed; retrying in %ss (%s)",
-                delay,
-                type(exc).__name__,
-                extra={"event": "job_retry", "chat_id": chat_id, "attempt": attempt},
-            )
-            raise Retry(defer=delay) from exc
-        logger.error(
-            "media job permanently failed (%s)",
-            type(exc).__name__,
-            extra={"event": "job_failed", "chat_id": chat_id, "attempt": attempt},
+        authentication_failed = is_authentication_error(exc)
+        retryable = is_retryable(exc)
+        will_retry = retryable and attempt < MAX_TRIES
+        _log_error(
+            "job_retry" if will_retry else "job_failed",
+            exc,
+            settings,
+            chat_id=chat_id,
+            attempt=attempt,
         )
-        await _reply_failure(bot, chat_id, message_id, ERROR)
+        if will_retry:
+            raise Retry(defer=2**attempt) from exc
+        if authentication_failed:
+            await _reply_failure(
+                bot, chat_id, message_id, SERVICE_UNAVAILABLE, settings
+            )
+            await _notify_cookie_expiry(ctx, settings)
+        else:
+            await _reply_failure(
+                bot, chat_id, message_id, _user_error(exc), settings
+            )
     finally:
         if directory is not None:
             await asyncio.to_thread(shutil.rmtree, directory, ignore_errors=True)
